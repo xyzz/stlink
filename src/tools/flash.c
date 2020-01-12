@@ -210,7 +210,16 @@ int main(int ac, char** av)
     else /* read */
     {
         if(o.area == FLASH_OPTION_BYTES){
-            if(sl->chip_id == STLINK_CHIPID_STM32_F2){
+            if(sl->chip_id == STLINK_CHIPID_STM32_F1_MEDIUM){
+                uint8_t option[16] = { 0 };
+                err = stlink_read_option_bytes_f1(sl, &option);
+                if (!err) {
+                    printf("%02X %02X %02X %02X %02X %02X %02X %02X ",
+                        option[0], option[1], option[2], option[3], option[4], option[5], option[6], option[7]);
+                    printf("%02X %02X %02X %02X %02X %02X %02X %02X\n",
+                        option[8], option[9], option[10], option[11], option[12], option[13], option[14], option[15]);
+                }
+            }else if(sl->chip_id == STLINK_CHIPID_STM32_F2){
                 uint32_t option_byte = 0;
                 err = stlink_read_option_bytes_f2(sl,&option_byte);
                 printf("%x\n",option_byte);

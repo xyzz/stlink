@@ -2765,6 +2765,24 @@ static int stlink_write_option_bytes_f4(stlink_t *sl, uint32_t option_byte) {
 /**
  * Read option bytes
  * @param sl
+ * @param option_byte pointer to an area of 8 bytes to read
+ * @return 0 on success, negative on failure.
+ */
+int stlink_read_option_bytes_f1(stlink_t *sl, void* option_byte) {
+    int ret = 0;
+
+    for (int i = 0; i < 4; ++i)
+        ret |= stlink_read_debug32(sl, 0x1FFFF800 + 4 * i, (uint32_t*)option_byte + i);
+
+    if (ret)
+        return -1;
+
+    return 0;
+}
+
+/**
+ * Read option bytes
+ * @param sl
  * @param option_byte value to write
  * @return 0 on success, -ve on failure.
  */
