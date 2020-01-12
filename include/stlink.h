@@ -204,6 +204,7 @@ typedef struct flash_loader {
     int stlink_mwrite_sram(stlink_t *sl, uint8_t* data, uint32_t length, stm32_addr_t addr);
     int stlink_fwrite_sram(stlink_t *sl, const char* path, stm32_addr_t addr);
     int stlink_verify_write_flash(stlink_t *sl, stm32_addr_t address, uint8_t *data, uint32_t length);
+    void stlink_opterase(stlink_t *sl);
 
     int stlink_chip_id(stlink_t *sl, uint32_t *chip_id);
     int stlink_cpu_id(stlink_t *sl, cortex_m3_cpuid_t *cpuid);

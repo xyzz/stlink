@@ -164,7 +164,8 @@ int main(int ac, char** av)
                 goto on_error;
             }
         }
-        else if (o.addr == STM32_G0_OPTION_BYTES_BASE || o.addr == STM32_L0_CAT2_OPTION_BYTES_BASE){
+        else if (o.addr == STM32_G0_OPTION_BYTES_BASE || o.addr == STM32_L0_CAT2_OPTION_BYTES_BASE ||
+                (o.addr >= STM32_F1_OPTION_BYTES_START && o.addr < STM32_F1_OPTION_BYTES_END)) {
             err = stlink_fwrite_option_bytes(sl, o.filename, o.addr);
             if (err == -1)
             {
@@ -206,6 +207,9 @@ int main(int ac, char** av)
             printf("Failed to reset device\n");
             goto on_error;
         }
+    } else if (o.cmd == CMD_OPTERASE)
+    {
+        stlink_opterase(sl);
     }
     else /* read */
     {

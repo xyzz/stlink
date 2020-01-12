@@ -32,6 +32,7 @@
 
 #define FLASH_ACR (FLASH_REGS_ADDR + 0x00)
 #define FLASH_KEYR (FLASH_REGS_ADDR + 0x04)
+#define FLASH_OPTKEYR (FLASH_REGS_ADDR + 0x08)
 #define FLASH_SR (FLASH_REGS_ADDR + 0x0c)
 #define FLASH_CR (FLASH_REGS_ADDR + 0x10)
 #define FLASH_AR (FLASH_REGS_ADDR + 0x14)
@@ -44,6 +45,9 @@
 #define FLASH_CR2 (FLASH_REGS_ADDR + 0x50)
 #define FLASH_AR2 (FLASH_REGS_ADDR + 0x54)
 #define FLASH_BANK2_START_ADDR 0x08080000
+#define FLASH_OPTWRE_BIT (1u << 9)
+#define FLASH_OPTER_BIT (1u << 5)
+#define FLASH_OPTPG_BIT (1u << 4)
 
 // For STM32F05x, the RDPTR_KEY may be wrong, but as it is not used anywhere...
 #define FLASH_RDPTR_KEY 0x00a5
@@ -2662,6 +2666,96 @@ static int stlink_write_option_bytes_l0_cat2(stlink_t *sl, uint8_t* base, uint32
     return 0;
 }
 
+void stlink_opterase(stlink_t *sl) {
+    uint32_t cr;
+
+    unlock_flash_if(sl);
+
+    stlink_read_debug32(sl, FLASH_CR, &cr);
+    if (!(cr & FLASH_OPTWRE_BIT)) {
+        WLOG("Unlocking option flash\n");
+        stlink_write_debug32(sl, FLASH_OPTKEYR, FLASH_KEY1);
+        stlink_write_debug32(sl, FLASH_OPTKEYR, FLASH_KEY2);
+
+        stlink_read_debug32(sl, FLASH_CR, &cr);
+        if (!(cr & FLASH_OPTWRE_BIT)) {
+            ELOG("Option flash unlock failed! System reset required to be able to unlock it again!\n");
+            return;
+        }
+    }
+
+    /* enable erase */
+    cr |= FLASH_OPTER_BIT;
+    stlink_write_debug32(sl, FLASH_CR, cr);
+
+    /* start erase */
+    set_flash_cr_strt(sl);
+
+    /* wait for erase to complete */
+    wait_flash_busy(sl);
+
+    /* unset erase bit */
+    cr &= ~FLASH_OPTER_BIT;
+    stlink_write_debug32(sl, FLASH_CR, cr);
+}
+
+static int stlink_write_option_bytes_f1(stlink_t *sl, uint32_t addr, uint8_t* buf, size_t len) {
+    uint32_t cr;
+    flash_loader_t fl;
+
+    /* from openocd, contrib/loaders/flash/stm32.s */
+    static const uint8_t option_writer[] = {
+        0x08, 0x4c, /* ldr	r4, STM32_FLASH_BASE */
+        0x1c, 0x44, /* add	r4, r3 */
+        /* write_half_word: */
+        0x10, 0x23, /* movs	r3, #0x10 */
+        0x23, 0x61, /* str	r3, [r4, #STM32_FLASH_CR_OFFSET] */
+        0x30, 0xf8, 0x02, 0x3b, /* ldrh	r3, [r0], #0x02 */
+        0x21, 0xf8, 0x02, 0x3b, /* strh	r3, [r1], #0x02 */
+        /* busy: */
+        0xe3, 0x68, /* ldr	r3, [r4, #STM32_FLASH_SR_OFFSET] */
+        0x13, 0xf0, 0x01, 0x0f, /* tst	r3, #0x01 */
+        0xfb, 0xd0, /* beq	busy */
+        0x13, 0xf0, 0x14, 0x0f, /* tst	r3, #0x14 */
+        0x01, 0xd1, /* bne	exit */
+        0x01, 0x3a, /* subs	r2, r2, #0x01 */
+        0xf0, 0xd1, /* bne	write_half_word */
+        /* exit: */
+        0x00, 0xbe, /* bkpt	#0x00 */
+        0x00, 0x20, 0x02, 0x40, /* STM32_FLASH_BASE: .word 0x40022000 */
+    };
+
+    unlock_flash_if(sl);
+
+    stlink_read_debug32(sl, FLASH_CR, &cr);
+    if (!(cr & FLASH_OPTWRE_BIT)) {
+        WLOG("Unlocking option flash\n");
+        stlink_write_debug32(sl, FLASH_OPTKEYR, FLASH_KEY1);
+        stlink_write_debug32(sl, FLASH_OPTKEYR, FLASH_KEY2);
+
+        stlink_read_debug32(sl, FLASH_CR, &cr);
+        if (!(cr & FLASH_OPTWRE_BIT)) {
+            ELOG("Option flash unlock failed! System reset required to be able to unlock it again!\n");
+            return -1;
+        }
+    }
+
+    /* flash loader initialization */
+    memcpy(sl->q_buf, option_writer, sizeof(option_writer));
+    stlink_write_mem32(sl, sl->sram_base, sizeof(option_writer));
+    fl.loader_addr = sl->sram_base;
+    fl.buf_addr = fl.loader_addr + sizeof(option_writer);
+
+    DLOG("Finished unlocking flash, running loader!\n");
+    if (stlink_flash_loader_run(sl, &fl, addr, buf, len) == -1) {
+        ELOG("flash failed");
+    }
+
+    DLOG("Option bytes are written\n");
+
+    return 0;
+}
+
 /**
  * Write option bytes
  * @param sl
@@ -2864,6 +2958,9 @@ int stlink_write_option_bytes(stlink_t *sl, stm32_addr_t addr, uint8_t* base, ui
     }
     else if((sl->chip_id == STLINK_CHIPID_STM32_L0_CAT2) && (addr == STM32_L0_CAT2_OPTION_BYTES_BASE)) {
         return stlink_write_option_bytes_l0_cat2(sl, base, len);
+    }
+    else if(sl->chip_id == STLINK_CHIPID_STM32_F1_MEDIUM && (addr >= STM32_F1_OPTION_BYTES_START && addr < STM32_F1_OPTION_BYTES_END)) {
+        return stlink_write_option_bytes_f1(sl, addr, base, len);
     }
     else {
         ELOG("Option bytes writing is currently only supported for the STM32F2, STM32G0 and STM32L0\n");
